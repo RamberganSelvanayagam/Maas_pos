@@ -8,7 +8,8 @@ interface ScannerProps {
 }
 
 export default function Scanner({ onScan }: ScannerProps) {
-    const [isScanning, setIsScanning] = useState(false);
+    const [status, setStatus] = useState<'IDLE' | 'STARTING' | 'SCANNING' | 'ERROR'>('IDLE');
+    const [errorMessage, setErrorMessage] = useState('');
     const scannerRef = useRef<Html5Qrcode | null>(null);
 
     useEffect(() => {
@@ -26,48 +27,37 @@ export default function Scanner({ onScan }: ScannerProps) {
         scannerRef.current = html5QrCode;
 
         const startScanner = async () => {
+            setStatus('STARTING');
             try {
+                // More compatible config
                 const config = {
-                    fps: 15,
-                    qrbox: { width: 300, height: 180 },
+                    fps: 10,
+                    qrbox: { width: 280, height: 160 },
                     aspectRatio: 1.0,
-                    formatsToSupport: formatsToSupport,
-                    experimentalFeatures: {
-                        useBarCodeDetectorIfSupported: true
-                    }
+                    formatsToSupport: formatsToSupport
                 };
 
-                // Request high resolution for better 1D barcode detection
-                const videoConstraints = {
-                    facingMode: "environment",
-                    width: { min: 640, ideal: 1280, max: 1920 },
-                    height: { min: 480, ideal: 720, max: 1080 }
-                };
-
+                // Use simple environment facing mode for maximum compatibility
                 await html5QrCode.start(
-                    videoConstraints,
+                    { facingMode: "environment" },
                     config as any,
                     (decodedText) => {
                         onScan(decodedText);
-                        stopScanner();
                     },
                     (errorMessage) => {
-                        // ignored
+                        // ignored during scanning
                     }
                 );
-                setIsScanning(true);
-            } catch (err) {
-                console.error("Unable to start scanning", err);
-            }
-        };
-
-        const stopScanner = async () => {
-            if (scannerRef.current && scannerRef.current.isScanning) {
-                try {
-                    await scannerRef.current.stop();
-                    setIsScanning(false);
-                } catch (err) {
-                    console.error("Failed to stop scanner", err);
+                setStatus('SCANNING');
+            } catch (err: any) {
+                console.error("Scanner Error:", err);
+                setStatus('ERROR');
+                if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+                    setErrorMessage("Camera requires HTTPS. Please deploy to Vercel to use on mobile.");
+                } else if (err.includes("NotAllowedError")) {
+                    setErrorMessage("Camera permission denied. Please enable it in browser settings.");
+                } else {
+                    setErrorMessage("Could not start camera. Try refreshing or using a different browser.");
                 }
             }
         };
@@ -75,33 +65,41 @@ export default function Scanner({ onScan }: ScannerProps) {
         startScanner();
 
         return () => {
-            stopScanner();
+            if (html5QrCode.isScanning) {
+                html5QrCode.stop().catch(err => console.warn("Stop error", err));
+            }
         };
     }, [onScan]);
-
-    const stopScanner = async () => {
-        if (scannerRef.current && scannerRef.current.isScanning) {
-            await scannerRef.current.stop();
-            setIsScanning(false);
-        }
-    };
 
     return (
         <div className="scanner-root">
             <div className="scanner-frame">
                 <div id="reader"></div>
-                {isScanning && <div className="scanner-laser"></div>}
+
+                {status === 'STARTING' && (
+                    <div className="status-overlay">Starting Camera...</div>
+                )}
+
+                {status === 'ERROR' && (
+                    <div className="status-overlay error">
+                        <p>{errorMessage}</p>
+                        <button onClick={() => window.location.reload()} className="retry-btn">Retry</button>
+                    </div>
+                )}
+
+                {status === 'SCANNING' && (
+                    <div className="scanner-laser"></div>
+                )}
             </div>
 
             <p className="scanner-tip">
-                💡 <b>Alignment:</b> Place the red line across the <b>entire</b> barcode.
-                Move slowly and ensure good lighting.
+                Align the red line across the barcode.
+                If it stays black, ensure you granted camera permissions.
             </p>
 
             <style jsx>{`
                 .scanner-root {
                     width: 100%;
-                    max-width: 500px;
                     margin: 0 auto;
                 }
                 .scanner-frame {
@@ -109,12 +107,38 @@ export default function Scanner({ onScan }: ScannerProps) {
                     width: 100%;
                     border-radius: var(--radius-lg);
                     overflow: hidden;
-                    background: #000;
-                    border: 2px solid var(--primary);
+                    background: #111;
+                    min-height: 250px;
+                    border: 2px solid var(--border);
                 }
                 #reader {
                     width: 100%;
-                    min-height: 300px;
+                }
+                .status-overlay {
+                    position: absolute;
+                    inset: 0;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    background: rgba(0,0,0,0.8);
+                    color: white;
+                    padding: 2rem;
+                    text-align: center;
+                    z-index: 20;
+                    font-size: 0.9rem;
+                }
+                .status-overlay.error {
+                    color: #ff8888;
+                }
+                .retry-btn {
+                    margin-top: 1rem;
+                    padding: 0.5rem 1rem;
+                    background: var(--primary);
+                    border: none;
+                    color: white;
+                    border-radius: var(--radius-sm);
+                    cursor: pointer;
                 }
                 .scanner-laser {
                     position: absolute;
@@ -128,17 +152,14 @@ export default function Scanner({ onScan }: ScannerProps) {
                     animation: laser-anim 2s infinite ease-in-out;
                 }
                 @keyframes laser-anim {
-                    0%, 100% { transform: translateY(-40px); opacity: 0.3; }
-                    50% { transform: translateY(40px); opacity: 1; }
+                    0%, 100% { transform: translateY(-30px); opacity: 0.3; }
+                    50% { transform: translateY(30px); opacity: 1; }
                 }
                 .scanner-tip {
-                    font-size: 0.8rem;
+                    font-size: 0.75rem;
                     color: var(--text-muted);
-                    margin-top: 1rem;
+                    margin-top: 0.75rem;
                     text-align: center;
-                    background: var(--surface);
-                    padding: 0.75rem;
-                    border-radius: var(--radius-md);
                 }
             `}</style>
         </div>
