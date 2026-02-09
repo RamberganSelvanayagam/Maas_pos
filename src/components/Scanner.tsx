@@ -31,9 +31,10 @@ export default function Scanner({ onScan }: ScannerProps) {
         const startScanner = async () => {
             setStatus('STARTING');
             try {
+                // Focus and Clarity are keys for 1D barcodes
                 const config = {
-                    fps: 15,
-                    qrbox: { width: 300, height: 180 },
+                    fps: 20,
+                    qrbox: { width: 300, height: 160 },
                     aspectRatio: 1.0,
                     formatsToSupport: formatsToSupport,
                     experimentalFeatures: {
@@ -41,27 +42,36 @@ export default function Scanner({ onScan }: ScannerProps) {
                     }
                 };
 
+                // Requesting better video constraints for mobile focus
+                const videoConstraints: any = {
+                    facingMode: "environment",
+                    focusMode: "continuous",
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                };
+
                 await html5QrCode.start(
-                    { facingMode: "environment" },
+                    videoConstraints,
                     config as any,
                     (decodedText) => {
                         onScan(decodedText);
-                        // Brief haptic feedback if possible
                         if (typeof navigator !== 'undefined' && navigator.vibrate) {
                             navigator.vibrate(100);
                         }
                     },
-                    (errorMessage) => {
-                        // ignored
-                    }
+                    () => { }
                 );
 
                 setStatus('SCANNING');
 
-                // Check for torch support
-                const capabilities = html5QrCode.getRunningTrackCapabilities();
-                if ((capabilities as any).torch) {
-                    setHasTorch(true);
+                // Check for torch/flashlight
+                try {
+                    const capabilities = html5QrCode.getRunningTrackCapabilities();
+                    if ((capabilities as any).torch) {
+                        setHasTorch(true);
+                    }
+                } catch (e) {
+                    console.warn("Could not detect torch capabilities", e);
                 }
 
             } catch (err: any) {
@@ -78,8 +88,14 @@ export default function Scanner({ onScan }: ScannerProps) {
         startScanner();
 
         return () => {
-            if (html5QrCode.isScanning) {
-                html5QrCode.stop().catch(err => console.warn("Stop error", err));
+            if (scannerRef.current && scannerRef.current.isScanning) {
+                scannerRef.current.stop()
+                    .then(() => {
+                        console.log("Scanner stopped successfully");
+                    })
+                    .catch(err => {
+                        console.warn("Stop error on unmount", err);
+                    });
             }
         };
     }, [onScan]);
@@ -88,8 +104,8 @@ export default function Scanner({ onScan }: ScannerProps) {
         if (!scannerRef.current || !hasTorch) return;
         try {
             const newState = !isTorchOn;
-            await scannerRef.current.applyVideoConstraints({
-                advanced: [{ torch: newState }] as any
+            await (scannerRef.current as any).applyVideoConstraints({
+                advanced: [{ torch: newState }]
             });
             setIsTorchOn(newState);
         } catch (err) {
@@ -103,13 +119,13 @@ export default function Scanner({ onScan }: ScannerProps) {
                 <div id="reader"></div>
 
                 {status === 'STARTING' && (
-                    <div className="status-overlay">Starting Camera...</div>
+                    <div className="status-overlay">Warming up camera...</div>
                 )}
 
                 {status === 'ERROR' && (
                     <div className="status-overlay error">
                         <p>{errorMessage}</p>
-                        <button onClick={() => window.location.reload()} className="retry-btn">Retry</button>
+                        <button onClick={() => window.location.reload()} className="retry-btn">Retry Camera</button>
                     </div>
                 )}
 
@@ -117,11 +133,8 @@ export default function Scanner({ onScan }: ScannerProps) {
                     <>
                         <div className="scanner-laser"></div>
                         {hasTorch && (
-                            <button className="torch-btn" onClick={toggleTorch} style={{ background: isTorchOn ? 'var(--warning)' : 'rgba(0,0,0,0.5)' }}>
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M15 17h.01" /><path d="M18 14h.01" /><path d="M12 21h.01" /><path d="M11 3l9 9-9 9-9-9 9-9z" />
-                                </svg>
-                                {isTorchOn ? 'Flash Off' : 'Flash On'}
+                            <button className="torch-btn" onClick={toggleTorch} style={{ background: isTorchOn ? 'var(--warning)' : 'rgba(0,0,0,0.6)' }}>
+                                {isTorchOn ? 'Flash Off 💡' : 'Flash On 🔦'}
                             </button>
                         )}
                     </>
@@ -129,8 +142,7 @@ export default function Scanner({ onScan }: ScannerProps) {
             </div>
 
             <p className="scanner-tip">
-                Align the red line across the barcode.
-                Use the <b>Flash</b> button in dark areas.
+                <b>Tip:</b> If it's blurry, move the phone slowly back and forth (10-20cm distance).
             </p>
 
             <style jsx>{`
@@ -145,7 +157,8 @@ export default function Scanner({ onScan }: ScannerProps) {
                     overflow: hidden;
                     background: #111;
                     min-height: 250px;
-                    border: 2px solid var(--border);
+                    border: 2px solid var(--primary);
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
                 }
                 #reader {
                     width: 100%;
@@ -157,12 +170,13 @@ export default function Scanner({ onScan }: ScannerProps) {
                     flex-direction: column;
                     align-items: center;
                     justify-content: center;
-                    background: rgba(0,0,0,0.8);
+                    background: rgba(0,0,0,0.85);
                     color: white;
                     padding: 2rem;
                     text-align: center;
                     z-index: 20;
                     font-size: 0.9rem;
+                    backdrop-filter: blur(4px);
                 }
                 .status-overlay.error {
                     color: #ff8888;
@@ -172,46 +186,46 @@ export default function Scanner({ onScan }: ScannerProps) {
                     bottom: 1rem;
                     right: 1rem;
                     z-index: 30;
-                    padding: 0.5rem 0.75rem;
-                    border-radius: var(--radius-md);
-                    border: 1px solid white;
+                    padding: 0.6rem 1rem;
+                    border-radius: 2rem;
+                    border: 1px solid rgba(255,255,255,0.3);
                     color: white;
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    font-size: 0.75rem;
-                    font-weight: 600;
+                    font-size: 0.8rem;
+                    font-weight: 700;
                     cursor: pointer;
+                    transition: all 0.2s;
                 }
                 .retry-btn {
-                    margin-top: 1rem;
-                    padding: 0.5rem 1rem;
+                    margin-top: 1.5rem;
+                    padding: 0.65rem 1.25rem;
                     background: var(--primary);
                     border: none;
                     color: white;
-                    border-radius: var(--radius-sm);
+                    border-radius: var(--radius-md);
+                    font-weight: 600;
                     cursor: pointer;
                 }
                 .scanner-laser {
                     position: absolute;
                     top: 50%;
-                    left: 10%;
-                    right: 10%;
+                    left: 5%;
+                    right: 5%;
                     height: 2px;
                     background-color: #ff3e3e;
-                    box-shadow: 0 0 8px #ff3e3e;
+                    box-shadow: 0 0 10px #ff3e3e;
                     z-index: 10;
                     animation: laser-anim 2s infinite ease-in-out;
                 }
                 @keyframes laser-anim {
-                    0%, 100% { transform: translateY(-30px); opacity: 0.3; }
-                    50% { transform: translateY(30px); opacity: 1; }
+                    0%, 100% { transform: translateY(-40px); opacity: 0.2; }
+                    50% { transform: translateY(40px); opacity: 0.9; }
                 }
                 .scanner-tip {
-                    font-size: 0.75rem;
+                    font-size: 0.8rem;
                     color: var(--text-muted);
                     margin-top: 0.75rem;
                     text-align: center;
+                    padding: 0 1rem;
                 }
             `}</style>
         </div>
