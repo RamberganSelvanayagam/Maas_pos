@@ -193,6 +193,32 @@ export default function POSPage() {
                 </button>
             </div>
 
+            {/* Manual Barcode Input Fallback */}
+            <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '0.5rem' }}>
+                <input
+                    type="text"
+                    className="input"
+                    placeholder="Enter barcode manually..."
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            handleScan((e.target as HTMLInputElement).value);
+                            (e.target as HTMLInputElement).value = '';
+                        }
+                    }}
+                    style={{ flexGrow: 1 }}
+                />
+                <button
+                    className="btn btn-primary"
+                    onClick={(e) => {
+                        const input = (e.currentTarget.previousSibling as HTMLInputElement);
+                        handleScan(input.value);
+                        input.value = '';
+                    }}
+                >
+                    Add
+                </button>
+            </div>
+
             {scanning && (
                 <div style={{ marginBottom: '1.5rem' }}>
                     <Scanner onScan={handleScan} />

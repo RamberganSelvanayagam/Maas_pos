@@ -10,6 +10,8 @@ interface ScannerProps {
 export default function Scanner({ onScan }: ScannerProps) {
     const [status, setStatus] = useState<'IDLE' | 'STARTING' | 'SCANNING' | 'ERROR'>('IDLE');
     const [errorMessage, setErrorMessage] = useState('');
+    const [hasTorch, setHasTorch] = useState(false);
+    const [isTorchOn, setIsTorchOn] = useState(false);
     const scannerRef = useRef<Html5Qrcode | null>(null);
 
     useEffect(() => {
@@ -29,35 +31,46 @@ export default function Scanner({ onScan }: ScannerProps) {
         const startScanner = async () => {
             setStatus('STARTING');
             try {
-                // More compatible config
                 const config = {
-                    fps: 10,
-                    qrbox: { width: 280, height: 160 },
+                    fps: 15,
+                    qrbox: { width: 300, height: 180 },
                     aspectRatio: 1.0,
-                    formatsToSupport: formatsToSupport
+                    formatsToSupport: formatsToSupport,
+                    experimentalFeatures: {
+                        useBarCodeDetectorIfSupported: true
+                    }
                 };
 
-                // Use simple environment facing mode for maximum compatibility
                 await html5QrCode.start(
                     { facingMode: "environment" },
                     config as any,
                     (decodedText) => {
                         onScan(decodedText);
+                        // Brief haptic feedback if possible
+                        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                            navigator.vibrate(100);
+                        }
                     },
                     (errorMessage) => {
-                        // ignored during scanning
+                        // ignored
                     }
                 );
+
                 setStatus('SCANNING');
+
+                // Check for torch support
+                const capabilities = html5QrCode.getRunningTrackCapabilities();
+                if ((capabilities as any).torch) {
+                    setHasTorch(true);
+                }
+
             } catch (err: any) {
                 console.error("Scanner Error:", err);
                 setStatus('ERROR');
                 if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-                    setErrorMessage("Camera requires HTTPS. Please deploy to Vercel to use on mobile.");
-                } else if (err.includes("NotAllowedError")) {
-                    setErrorMessage("Camera permission denied. Please enable it in browser settings.");
+                    setErrorMessage("Camera requires HTTPS. Please use the Vercel link on mobile.");
                 } else {
-                    setErrorMessage("Could not start camera. Try refreshing or using a different browser.");
+                    setErrorMessage("Could not start camera. Please ensure permissions are granted.");
                 }
             }
         };
@@ -70,6 +83,19 @@ export default function Scanner({ onScan }: ScannerProps) {
             }
         };
     }, [onScan]);
+
+    const toggleTorch = async () => {
+        if (!scannerRef.current || !hasTorch) return;
+        try {
+            const newState = !isTorchOn;
+            await scannerRef.current.applyVideoConstraints({
+                advanced: [{ torch: newState }] as any
+            });
+            setIsTorchOn(newState);
+        } catch (err) {
+            console.error("Failed to toggle torch", err);
+        }
+    };
 
     return (
         <div className="scanner-root">
@@ -88,13 +114,23 @@ export default function Scanner({ onScan }: ScannerProps) {
                 )}
 
                 {status === 'SCANNING' && (
-                    <div className="scanner-laser"></div>
+                    <>
+                        <div className="scanner-laser"></div>
+                        {hasTorch && (
+                            <button className="torch-btn" onClick={toggleTorch} style={{ background: isTorchOn ? 'var(--warning)' : 'rgba(0,0,0,0.5)' }}>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M15 17h.01" /><path d="M18 14h.01" /><path d="M12 21h.01" /><path d="M11 3l9 9-9 9-9-9 9-9z" />
+                                </svg>
+                                {isTorchOn ? 'Flash Off' : 'Flash On'}
+                            </button>
+                        )}
+                    </>
                 )}
             </div>
 
             <p className="scanner-tip">
                 Align the red line across the barcode.
-                If it stays black, ensure you granted camera permissions.
+                Use the <b>Flash</b> button in dark areas.
             </p>
 
             <style jsx>{`
@@ -130,6 +166,22 @@ export default function Scanner({ onScan }: ScannerProps) {
                 }
                 .status-overlay.error {
                     color: #ff8888;
+                }
+                .torch-btn {
+                    position: absolute;
+                    bottom: 1rem;
+                    right: 1rem;
+                    z-index: 30;
+                    padding: 0.5rem 0.75rem;
+                    border-radius: var(--radius-md);
+                    border: 1px solid white;
+                    color: white;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    font-size: 0.75rem;
+                    font-weight: 600;
+                    cursor: pointer;
                 }
                 .retry-btn {
                     margin-top: 1rem;
